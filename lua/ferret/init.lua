@@ -5,7 +5,9 @@ local function trim(text)
     return (text:gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
---- @return string concatenated visual selection
+--- Get the contents of the current visual selection. Throw an error if nothing is/was selected.
+--- NOTE: This cannot be called from a "fast event context"
+--- @return string concatenated visual selection contents
 local function get_visual()
     local has_start, start = pcall(vim.fn.getpos, "'<")
     local has_end, end_ = pcall(vim.fn.getpos, "'>")
@@ -25,25 +27,36 @@ local function get_visual()
     error("Cannot get visual selection if nothing is selected.")
 end
 
+--- Get the contents of the current buffer
+--- NOTE: This cannot be called from a "fast event context"
 --- @return string concatenated buffer contents
 local function get_buffer()
     local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
     return table.concat(lines, "\n")
 end
 
+--- Try to get the openai api key via a shell command
 --- @param command table command to run
-local function get_api_key(command)
-    local key_out = vim.fn.system(command)
-    if vim.v.shell_error ~= 0 then
-        error("Could not generate api key. Command failed.")
-    end
+--- @param on_success function to be ran when the command succeeds
+--- @param on_error function to be ran when the command fails
+--- @return nil
+local function get_api_key_via_cmd(command, on_success, on_error)
+    local key_out = vim.system(command, {}, function(out)
+        if out.code ~= 0 then
+            on_error("Could not generate api key. Command failed with exit code " .. out.code .. ".")
+        end
 
-    local api_key = trim(key_out)
-    if api_key == "" then
-        error("Could not generate api key. Result was empty.")
-    end
+        if not out.stdout or out.stdout == "" then
+            on_error("Could not generate api key. Command did not output anything.")
+        end
 
-    return api_key
+        local api_key = trim(out.stdout)
+        if api_key == "" then
+            on_error("Could not generate api key. Command yielded whitespace-only api key.")
+        end
+
+        on_success(api_key)
+    end)
 end
 
 M.setup = function()
@@ -51,11 +64,14 @@ M.setup = function()
 end
 
 M.ask = function()
-    local has_api_key, api_key = pcall(get_api_key, { "pass", "show", "openai/api/chatgpt.nvim" })
-    if not has_api_key then
-        error("Could not ask AI. Could not generate api key.")
-    end
+    get_api_key_via_cmd({ "pass", "show", "openai/api/chatgpt.nvim" }, function(api_key)
+        vim.schedule(function()
+            M.ask_with_api_key(api_key)
+        end)
+    end, error)
+end
 
+M.ask_with_api_key = function(api_key)
     local has_selection, selection = pcall(get_visual)
     local context = has_selection and selection or get_buffer()
     local fenced = "```\n" .. context .. "\n```"
