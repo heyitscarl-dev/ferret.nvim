@@ -20,11 +20,11 @@ local function get_visual()
     local eline, ecol = end_[2], end_[3]
 
     local lines = vim.api.nvim_buf_get_text(0, sline - 1, scol - 1, eline - 1, ecol, {})
-    if #lines > 0 then
-        return table.concat(lines, "\n")
+    if #lines == 0 then
+        error("Cannot get visual selection if nothing is selected.")
     end
 
-    error("Cannot get visual selection if nothing is selected.")
+    return table.concat(lines, "\n")
 end
 
 --- Get the contents of the current buffer
@@ -89,14 +89,16 @@ M.ask_with_api_key = function(api_key)
         }
     })
 
-    local response = vim.fn.system({
+    local response = vim.system({
         "curl", "-sS",
         "-H", "Content-Type: application/json",
         "-H", "Authorization: Bearer " .. api_key,
         "-d", payload,
         "https://api.openai.com/v1/chat/completions"
-    })
+    }, {}, M.ask_provider_with_api_key)
+end
 
+M.ask_provider_with_api_key = function(out)
     if vim.v.shell_error ~= 0 then
         error("Could not ask AI. Could not reach openai.")
     end
