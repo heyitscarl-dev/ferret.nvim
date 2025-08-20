@@ -5,45 +5,77 @@ local function trim(text)
     return (text:gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
---- @return string concatenated visual selection
+--- Get the contents of the current visual selection. Throw an error if nothing is/was selected.
+--- NOTE: This cannot be called from a "fast event context"
+--- @return string concatenated visual selection contents
 local function get_visual()
-    local has_start, start = pcall(vim.fn.getpos, "'<")
-    local has_end, end_ = pcall(vim.fn.getpos, "'>")
-
-    if not has_start or not has_end then
-        error("Cannot get visual selection if no '< or '> is set.")
+    local mode = vim.fn.mode()
+    if not mode:match("[vV\22]") then
+        error("Cannot get visual selection. Not in visual mode.")
     end
 
-    local sline, scol = start[2], start[3]
-    local eline, ecol = end_[2], end_[3]
+    local start = vim.fn.getpos("v")    -- (selection start)
+    local end_ = vim.fn.getpos(".")      -- (selection end / cursor position)
 
-    local lines = vim.api.nvim_buf_get_text(0, sline - 1, scol - 1, eline - 1, ecol, {})
-    if #lines > 0 then
+    local sline, eline = math.min(start[2], end_[2]) - 1, math.max(start[2], end_[2]) - 1
+    local scol, ecol = start[3] - 1, end_[3] - 1
+
+    local lines = vim.api.nvim_buf_get_lines(0, sline, eline + 1, false)
+
+    -- If in line visual mode, return all selected lines.
+    if mode == "V" then
         return table.concat(lines, "\n")
     end
 
-    error("Cannot get visual selection if nothing is selected.")
+    -- If in block visual mode, clamp beginning and end of all lines.
+    if mode == "\22" then
+        for i = 1, #lines do
+            lines[i] = string.sub(lines[i], scol + 1, ecol)
+        end
+        return table.concat(lines, "\n")
+    end
+
+    -- If in regular visual mode, clamp beginning of first line, and end of last line.
+    if #lines == 1 then
+        lines[1] = string.sub(lines[1], math.min(scol, ecol) + 1, math.max(scol, ecol))
+    else
+        lines[1] = string.sub(lines[1], scol + 1)
+        lines[#lines] = string.sub(lines[#lines], 1, ecol)
+    end
+
+    return table.concat(lines, "\n")
 end
 
+--- Get the contents of the current buffer
+--- NOTE: This cannot be called from a "fast event context"
 --- @return string concatenated buffer contents
 local function get_buffer()
     local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
     return table.concat(lines, "\n")
 end
 
+--- Try to get the openai api key via a shell command
 --- @param command table command to run
-local function get_api_key(command)
-    local key_out = vim.fn.system(command)
-    if vim.v.shell_error ~= 0 then
-        error("Could not generate api key. Command failed.")
-    end
+--- @param on_success function to be ran when the command succeeds
+--- @param on_error function to be ran when the command fails
+--- @return nil
+local function get_api_key_via_cmd(command, on_success, on_error)
+    vim.system(command, {}, function(out)
+        if out.code ~= 0 then
+            on_error("Could not generate api key. Command failed with exit code " .. out.code .. ".")
+        end
 
-    local api_key = trim(key_out)
-    if api_key == "" then
-        error("Could not generate api key. Result was empty.")
-    end
+        if not out.stdout or out.stdout == "" then
+            on_error("Could not generate api key. Command did not output anything.")
+        end
 
-    return api_key
+        local api_key = trim(out.stdout)
+        if api_key == "" then
+            on_error("Could not generate api key. Command yielded whitespace-only api key.")
+        end
+
+        on_success(api_key)
+    end)
 end
 
 M.setup = function()
@@ -51,14 +83,16 @@ M.setup = function()
 end
 
 M.ask = function()
-    local has_api_key, api_key = pcall(get_api_key, { "pass", "show", "openai/api/chatgpt.nvim" })
-    if not has_api_key then
-        error("Could not ask AI. Could not generate api key.")
-    end
+    get_api_key_via_cmd({ "pass", "show", "openai/api/chatgpt.nvim" }, function(api_key)
+        vim.schedule(function()
+            M.ask_with_api_key(api_key)
+        end)
+    end, error)
+end
 
+M.ask_with_api_key = function(api_key)
     local has_selection, selection = pcall(get_visual)
-    local context = has_selection and selection or get_buffer()
-    local fenced = "```\n" .. context .. "\n```"
+    local fenced = "```\n" .. (has_selection and selection or get_buffer()) .. "\n```"
 
     local user_prompt = vim.fn.input("Ask AI...")
     if not user_prompt or user_prompt == "" then
@@ -73,19 +107,30 @@ M.ask = function()
         }
     })
 
-    local response = vim.fn.system({
+    vim.system({
         "curl", "-sS",
         "-H", "Content-Type: application/json",
         "-H", "Authorization: Bearer " .. api_key,
         "-d", payload,
         "https://api.openai.com/v1/chat/completions"
-    })
+    }, {}, function(out)
+        vim.schedule(function()
+            M.ask_with_response(out)
+        end)
+    end)
+end
 
-    if vim.v.shell_error ~= 0 then
+--- @param out vim.SystemCompleted
+M.ask_with_response = function(out)
+    if out.code ~= 0 then
         error("Could not ask AI. Could not reach openai.")
     end
 
-    local has_data, data = pcall(vim.json.decode, response)
+    if not out.stdout or out.stdout == "" then
+        error("Could not ask AI. No response from openai.")
+    end
+
+    local has_data, data = pcall(vim.json.decode, out.stdout)
     if not has_data then
         error("Could not ask AI. Invalid response from openai.")
     end
