@@ -3,7 +3,7 @@ A minimal neovim plugin that allows you to ask questions about your code - and h
 
 ## Features
 
-- [ ] Select text in **visual mode** and query an LLM with a single keymap.
+- [x] Select text in **visual mode** and query an LLM with a single keymap.
 - [ ] Get answers back directly, inside a floating window or a scratch buffer.
 - [ ] Pluggable **provider system** (OpenAI, Anthropic, etc.)
 
