@@ -94,8 +94,6 @@ M.ask_with_api_key = function(api_key)
     local has_selection, selection = pcall(get_visual)
     local fenced = "```\n" .. (has_selection and selection or get_buffer()) .. "\n```"
 
-    vim.print(fenced)
-
     local user_prompt = vim.fn.input("Ask AI...")
     if not user_prompt or user_prompt == "" then
         error("Could not ask AI. No prompt provided.")
