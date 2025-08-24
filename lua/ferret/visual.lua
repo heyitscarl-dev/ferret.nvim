@@ -100,4 +100,17 @@ M.get = function()
     return get_charwise_visual(spos, epos, lines)
 end
 
+--- Line- and column- numbers are absolute. I.e. they refer to line numbers in the buffer.
+--- This has to be converted somehow to instead be relative to the editor.
+--- @param bufpos { line: integer, column: integer }
+--- @return { line: integer, column: integer }?
+M.get_screenpos = function(winnr, bufpos)
+    local screenpos = vim.fn.screenpos(winnr, bufpos.line, bufpos.column)
+    if not screenpos or screenpos.row == 0 then
+        return nil
+    end
+
+    return { line = screenpos.row, column = screenpos.col }
+end
+
 return M
