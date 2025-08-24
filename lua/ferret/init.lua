@@ -5,55 +5,6 @@ local function trim(text)
     return (text:gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
---- Get the contents of the current visual selection. Throw an error if nothing is/was selected.
---- NOTE: This cannot be called from a "fast event context"
---- @return string concatenated visual selection contents
-local function get_visual()
-    local mode = vim.fn.mode()
-    if not mode:match("[vV\22]") then
-        error("Cannot get visual selection. Not in visual mode.")
-    end
-
-    local start = vim.fn.getpos("v")    -- (selection start)
-    local end_ = vim.fn.getpos(".")      -- (selection end / cursor position)
-
-    local sline, eline = math.min(start[2], end_[2]) - 1, math.max(start[2], end_[2]) - 1
-    local scol, ecol = start[3] - 1, end_[3] - 1
-
-    local lines = vim.api.nvim_buf_get_lines(0, sline, eline + 1, false)
-
-    -- If in line visual mode, return all selected lines.
-    if mode == "V" then
-        return table.concat(lines, "\n")
-    end
-
-    -- If in block visual mode, clamp beginning and end of all lines.
-    if mode == "\22" then
-        for i = 1, #lines do
-            lines[i] = string.sub(lines[i], scol + 1, ecol)
-        end
-        return table.concat(lines, "\n")
-    end
-
-    -- If in regular visual mode, clamp beginning of first line, and end of last line.
-    if #lines == 1 then
-        lines[1] = string.sub(lines[1], math.min(scol, ecol) + 1, math.max(scol, ecol))
-    else
-        lines[1] = string.sub(lines[1], scol + 1)
-        lines[#lines] = string.sub(lines[#lines], 1, ecol)
-    end
-
-    return table.concat(lines, "\n")
-end
-
---- Get the contents of the current buffer
---- NOTE: This cannot be called from a "fast event context"
---- @return string concatenated buffer contents
-local function get_buffer()
-    local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-    return table.concat(lines, "\n")
-end
-
 --- Try to get the openai api key via a shell command
 --- @param command table command to run
 --- @param on_success function to be ran when the command succeeds
@@ -78,16 +29,18 @@ local function get_api_key_via_cmd(command, on_success, on_error)
     end)
 end
 
-M.setup = function()
+M.setup = function(opts)
     -- nothing
 end
 
 M.ask = function()
-    get_api_key_via_cmd({ "pass", "show", "openai/api/chatgpt.nvim" }, function(api_key)
-        vim.schedule(function()
-            M.ask_with_api_key(api_key)
-        end)
-    end, error)
+    local selection = require("ferret.visual").get()
+    local float = require("ferret.float").open(selection, { "💭 Thinking...", "Request sent to openai." })
+    -- get_api_key_via_cmd({ "pass", "show", "openai/api/chatgpt.nvim" }, function(api_key)
+    --     vim.schedule(function()
+    --         M.ask_with_api_key(api_key)
+    --     end)
+    -- end, error)
 end
 
 M.ask_with_api_key = function(api_key)
