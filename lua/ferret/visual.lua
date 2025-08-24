@@ -1,10 +1,10 @@
 local M = {}
 
 --- @class ferret.VisualSelection
---- @field type "char"|"line"|"block"
---- @field spos { line: integer, column: integer }
---- @field epos { line: integer, column: integer }
---- @field text? string[]
+--- @field type "char"|"line"|"block"|"buffer"
+--- @field spos? { line: integer, column: integer }
+--- @field epos? { line: integer, column: integer }
+--- @field text string[]
 
 --- @param spos { line: integer, column: integer }
 --- @param epos { line: integer, column: integer }
@@ -57,6 +57,15 @@ local function get_charwise_visual(spos, epos, lines)
     }
 end
 
+--- @return ferret.VisualSelection
+local function get_buffer()
+    local lines = vim.api.nvim_buf_get_lines(0, 1, -1, false)
+    return {
+        type = "buffer",
+        text = lines
+    }
+end
+
 --- @return { line: integer, column: integer }, { line: integer, column: integer }
 local function get_positions()
     local from = vim.fn.getpos("v")     -- selection start
@@ -74,7 +83,7 @@ end
 M.get = function()
     local mode = vim.fn.mode()
     if not mode:match("[vV\22]") then
-        error("Cannot get visual selection. Not in visual mode.")
+        return get_buffer()
     end
 
     local spos, epos = get_positions()
